@@ -1,26 +1,432 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Corporate Integration Management · Strategy Simulation</title>
-  <meta name="description" content="Strategy Implementation Simulation — Multiplayer Edition. Lead a corporate integration, convert 12 key stakeholders within 60 resource units." />
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0f0d; }
-    iframe {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      border: none;
-    }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Global Integration Challenge · 整合管理模拟</title>
+<meta name="description" content="Strategy Implementation Simulation — 线上模拟游戏。带领企业整合，在 60 资源单位内转化 12 位关键人物，并与同伴比较策略。" />
+
+<!-- WorkBuddy 云服务 SDK（CDN 形式，本项目为纯静态页面，无构建步骤） -->
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+
+<style>
+  /* ── 云服务未就绪时的占位样式 ── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #0a0f0d;
+    color: #d8eef4;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    overflow: hidden;
+  }
+
+  #gameFrame {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    border: none;
+    z-index: 1;
+  }
+
+  /* 排行榜抽屉：盖在游戏之上 */
+  #lbOverlay {
+    position: fixed; inset: 0;
+    z-index: 50;
+    background: rgba(4, 10, 14, .82);
+    backdrop-filter: blur(6px);
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+  }
+  #lbOverlay.show { display: flex; }
+
+  .lb-panel {
+    width: 100%; max-width: 760px;
+    background: #0d1e2a;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 20px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.55);
+    overflow: hidden;
+    margin: auto 0;
+  }
+  .lb-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 20px 22px;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    background: linear-gradient(135deg, rgba(13,139,150,.18), transparent);
+  }
+  .lb-head h2 {
+    font-size: 20px; font-weight: 800; display: flex; align-items: center; gap: 9px;
+    color: #eaf7fa;
+  }
+  .lb-head .sub { font-size: 12px; color: #5a8090; margin-top: 3px; font-weight: 500; }
+  .lb-close {
+    border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.05);
+    color: #9fc3ce; width: 34px; height: 34px; border-radius: 10px;
+    font-size: 17px; cursor: pointer; flex-shrink: 0; line-height: 1;
+    transition: all .18s;
+  }
+  .lb-close:hover { background: rgba(255,255,255,.12); color: #fff; }
+
+  .lb-stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+    padding: 16px 22px 4px;
+  }
+  .lb-stat {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.07);
+    border-radius: 12px; padding: 11px 12px;
+  }
+  .lb-stat .v { font-size: 19px; font-weight: 800; color: #3ecfdc; line-height: 1.2; }
+  .lb-stat .l { font-size: 11px; color: #5a8090; margin-top: 2px; }
+
+  .lb-body { padding: 16px 22px 22px; }
+  .lb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .lb-table th {
+    text-align: left; font-size: 11px; font-weight: 600; color: #5a8090;
+    padding: 8px 8px; border-bottom: 1px solid rgba(255,255,255,.1);
+    white-space: nowrap;
+  }
+  .lb-table td {
+    padding: 10px 8px; border-bottom: 1px solid rgba(255,255,255,.05);
+    white-space: nowrap;
+  }
+  .lb-table tr.me { background: rgba(13,139,150,.16); }
+  .lb-table tr.me td { color: #7fe3ef; font-weight: 600; }
+  .lb-rank { font-weight: 800; color: #5a8090; width: 42px; }
+  .lb-table tr:nth-child(2) .lb-rank,
+  .lb-table tr:nth-child(3) .lb-rank,
+  .lb-table tr:nth-child(4) .lb-rank { color: #fbbf24; }
+  .lb-score { font-weight: 800; color: #3ecfdc; font-size: 15px; }
+  .lb-name { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+  .lb-badge {
+    display: inline-block; padding: 1px 7px; border-radius: 20px;
+    font-size: 10px; font-weight: 700; margin-left: 6px;
+  }
+  .lb-badge.win { background: rgba(74,222,128,.18); color: #4ade80; }
+  .lb-badge.fail { background: rgba(239,68,68,.18); color: #f87171; }
+
+  .lb-empty, .lb-loading {
+    text-align: center; color: #5a8090; padding: 34px 12px; font-size: 13px; line-height: 1.8;
+  }
+  .lb-err { color: #f7a072; }
+
+  .lb-mycard {
+    margin-top: 16px; padding: 14px 16px;
+    background: linear-gradient(135deg, rgba(13,139,150,.2), rgba(13,139,150,.05));
+    border: 1px solid rgba(62,207,220,.3); border-radius: 14px;
+    font-size: 13px; line-height: 1.7;
+  }
+  .lb-mycard strong { color: #7fe3ef; }
+
+  @media (max-width: 560px) {
+    .lb-stats { grid-template-columns: repeat(2, 1fr); }
+    .lb-name { max-width: 108px; }
+    .lb-table { font-size: 12px; }
+    .lb-table th, .lb-table td { padding: 8px 5px; }
+    .lb-head { padding: 16px; }
+    .lb-body { padding: 12px 16px 18px; }
+    .lb-stats { padding: 12px 16px 2px; }
+  }
+</style>
 </head>
 <body>
-  <iframe
-    src="https://china-game-mzbua6le.manus.space/en"
-    allow="fullscreen"
-    title="Corporate Integration Management · Strategy Simulation"
-  ></iframe>
+
+<iframe id="gameFrame" src="integration-fixed.html" allow="fullscreen"
+        title="Corporate Integration Management · Strategy Simulation"></iframe>
+
+<!-- 排行榜抽屉 -->
+<div id="lbOverlay" role="dialog" aria-modal="true" aria-label="排行榜">
+  <div class="lb-panel">
+    <div class="lb-head">
+      <div>
+        <h2>🏆 排行榜</h2>
+        <div class="sub">所有玩家的综合得分排名</div>
+      </div>
+      <button class="lb-close" id="lbClose" aria-label="关闭">✕</button>
+    </div>
+    <div class="lb-stats" id="lbStats"></div>
+    <div class="lb-body">
+      <div id="lbMyCard"></div>
+      <div id="lbList"><div class="lb-loading">加载中…</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   云服务初始化
+   ---------------------------------------------------------
+   endpoint / publishableKey 来自开通云服务时返回的 publicConfig。
+   在下方 __CLOUD_CONFIG__ 里填入后即可生效。
+   ========================================================= */
+const __CLOUD_CONFIG__ = /*__CLOUD_CONFIG__*/ null;
+
+let cloud = null;
+let cloudReady = false;
+
+function initCloud() {
+  if (!__CLOUD_CONFIG__ || !__CLOUD_CONFIG__.endpoint || !__CLOUD_CONFIG__.publishableKey) {
+    console.warn('[cloud] publicConfig 未配置，排行榜暂不可用');
+    return false;
+  }
+  if (typeof WorkBuddyCloud === 'undefined') {
+    console.warn('[cloud] SDK 未加载（可能离线）');
+    return false;
+  }
+  try {
+    cloud = WorkBuddyCloud.createWorkBuddyCloud({
+      endpoint: __CLOUD_CONFIG__.endpoint,
+      oauthRelayBaseUrl: __CLOUD_CONFIG__.oauthRelayBaseUrl,
+      publishableKey: __CLOUD_CONFIG__.publishableKey,
+    });
+    cloudReady = true;
+    return true;
+  } catch (e) {
+    console.warn('[cloud] 初始化失败：', e && e.message);
+    return false;
+  }
+}
+initCloud();
+
+/* =========================================================
+   工具
+   ========================================================= */
+const $ = (id) => document.getElementById(id);
+const gameFrame = $('gameFrame');
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* 玩家昵称：存本地，开局时注入游戏 */
+const NAME_KEY = 'co-leaderboard-name';
+function getPlayerName() {
+  try { return localStorage.getItem(NAME_KEY) || ''; } catch (_) { return ''; }
+}
+function setPlayerName(n) {
+  try { localStorage.setItem(NAME_KEY, n); } catch (_) {}
+}
+
+/* =========================================================
+   成绩上报
+   ---------------------------------------------------------
+   游戏结算时会 postMessage 一条 GAME_ENDED，携带完整战绩。
+   这里把它写进云端，并触发排行榜刷新。
+   ========================================================= */
+let lastResult = null;
+
+window.addEventListener('message', async (ev) => {
+  const d = ev.data;
+  if (!d || d.type !== 'GAME_ENDED' || !d.result) return;
+  lastResult = d.result;
+
+  const name = getPlayerName() || '匿名玩家';
+  const r = d.result;
+
+  if (!cloudReady) {
+    showSaveState('offline');
+    return;
+  }
+
+  showSaveState('saving');
+  try {
+    const totalRounds = Math.max(1, Number(r.totalRounds) || 1);
+    const { error } = await cloud.database.from('scores').insert({
+      player_name:    name,
+      status:         r.won ? 'win' : 'fail',
+      total_score:    clampInt(r.totalScore, 0, 100),
+      base_score:     clampInt(r.baseScore, 0, 100),
+      health_score:   clampInt(r.healthScore, 0, 100),
+      converted_count:clampInt(r.convertedCount, 0, 12),
+      total_rounds:   clampInt(totalRounds, 1, 999),
+      resources_left: clampInt(r.resourcesLeft, 0, 9999),
+      final_cred:     clampInt(r.finalCred, 0, 999),
+      final_pressure: clampInt(r.finalPressure, 0, 999),
+      aggressive_index: clampInt(r.aggressiveIndex, 0, 999),
+      conservative_index: clampInt(r.conservativeIndex, 0, 999),
+    });
+    if (error) throw error;
+    showSaveState('saved');
+  } catch (e) {
+    console.warn('[cloud] 成绩保存失败：', e && (e.message || e));
+    showSaveState('failed');
+  }
+});
+
+function clampInt(v, lo, hi) {
+  const n = Math.round(Number(v));
+  if (!isFinite(n)) return lo;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+/* 告诉游戏本局是否已存档（结算页顶部会显示徽标） */
+function showSaveState(state) {
+  const map = {
+    saving:  { text: '⏳ 正在保存成绩…',             color: '#fbbf24' },
+    saved:   { text: '✓ 已保存到排行榜',             color: '#4ade80' },
+    failed:  { text: '⚠️ 成绩保存失败（排行榜不可用）', color: '#f7a072' },
+    offline: { text: 'ℹ️ 本地模式：未连接排行榜',     color: '#5a8090' },
+  };
+  const s = map[state];
+  if (!s) return;
+  try {
+    gameFrame.contentWindow.postMessage({
+      type: 'SET_SAVE_STATE', text: s.text, color: s.color,
+    }, '*');
+  } catch (_) {}
+}
+
+/* =========================================================
+   排行榜抽屉
+   ========================================================= */
+function getTop(n) {
+  return cloud.database
+    .from('scores')
+    .select('id, player_name, status, total_score, converted_count, total_rounds, resources_left, final_cred, final_pressure, created_at')
+    .order('total_score', { ascending: false })
+    .order('created_at', { ascending: true })
+    .limit(n);
+}
+
+async function openLeaderboard() {
+  const ov = $('lbOverlay');
+  ov.classList.add('show');
+  document.body.style.overflow = 'hidden';
+
+  if (!cloudReady) {
+    $('lbStats').innerHTML = '';
+    $('lbMyCard').innerHTML = '';
+    $('lbList').innerHTML =
+      '<div class="lb-empty lb-err">排行榜暂不可用。<br>云端服务正在开通中，请稍后再试。</div>';
+    return;
+  }
+
+  $('lbList').innerHTML = '<div class="lb-loading">加载中…</div>';
+  try {
+    const [listRes, statsRes] = await Promise.all([
+      getTop(50),
+      cloud.database.from('scores').select('total_score, base_score, health_score', { count: 'exact' }),
+    ]);
+    if (listRes.error) throw listRes.error;
+
+    renderStats(statsRes.data || []);
+    renderList(listRes.data || []);
+  } catch (e) {
+    console.warn('[cloud] 读取排行榜失败：', e && (e.message || e));
+    $('lbList').innerHTML =
+      '<div class="lb-empty lb-err">读取排行榜失败。<br>' + esc(e && (e.message || e)) + '</div>';
+  }
+}
+
+function renderStats(rows) {
+  const n = rows.length;
+  if (!n) { $('lbStats').innerHTML = ''; return; }
+  const avg = (f) => (rows.reduce((a, r) => a + (Number(r[f]) || 0), 0) / n).toFixed(1);
+  const best = Math.max(...rows.map((r) => Number(r.total_score) || 0));
+  $('lbStats').innerHTML = [
+    { v: n,            l: '完成局数' },
+    { v: avg('total_score'),  l: '平均得分' },
+    { v: best,         l: '最高分' },
+    { v: avg('health_score'), l: '平均健康度' },
+  ].map((s) => `<div class="lb-stat"><div class="v">${esc(s.v)}</div><div class="l">${esc(s.l)}</div></div>`).join('');
+}
+
+function renderList(rows) {
+  const me = getPlayerName();
+
+  if (!rows.length) {
+    $('lbList').innerHTML = '<div class="lb-empty">还没有人完成挑战 —— 快去成为第一个吧！</div>';
+    $('lbMyCard').innerHTML = '';
+    return;
+  }
+
+  const body = rows.map((r, i) => {
+    const isMe = me && r.player_name === me;
+    const badge = r.status === 'win'
+      ? '<span class="lb-badge win">通关</span>'
+      : '<span class="lb-badge fail">未达标</span>';
+    return `<tr class="${isMe ? 'me' : ''}">
+      <td class="lb-rank">#${i + 1}</td>
+      <td class="lb-name">${esc(r.player_name)}${badge}</td>
+      <td class="lb-score">${Number(r.total_score) || 0}</td>
+      <td>${Number(r.converted_count) || 0}/12</td>
+      <td>${Number(r.total_rounds) || 0}</td>
+      <td>${Number(r.final_cred) || 0} / ${Number(r.final_pressure) || 0}</td>
+    </tr>`;
+  }).join('');
+
+  $('lbList').innerHTML = `
+    <table class="lb-table">
+      <thead><tr>
+        <th>排名</th><th>玩家</th><th>总分</th><th>转化</th><th>回合</th><th>信誉/压力</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    <div class="lb-empty" style="padding:14px 0 0;font-size:11px">仅显示前 50 名 · 按得分从高到低</div>`;
+
+  /* 本局名次 */
+  const myIdx = rows.findIndex((r) => me && r.player_name === me);
+  if (myIdx >= 0) {
+    const r = rows[myIdx];
+    $('lbMyCard').innerHTML = `<div class="lb-mycard">
+      你的最好成绩：<strong>第 ${myIdx + 1} 名</strong> ·
+      总分 <strong>${Number(r.total_score) || 0}</strong> ·
+      转化 <strong>${Number(r.converted_count) || 0}/12</strong> ·
+      用 <strong>${Number(r.total_rounds) || 0}</strong> 回合
+    </div>`;
+  } else {
+    $('lbMyCard').innerHTML = '';
+  }
+}
+
+function closeLeaderboard() {
+  $('lbOverlay').classList.remove('show');
+  document.body.style.overflow = '';
+}
+
+$('lbClose').addEventListener('click', closeLeaderboard);
+$('lbOverlay').addEventListener('click', (e) => { if (e.target === $('lbOverlay')) closeLeaderboard(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLeaderboard(); });
+
+/* =========================================================
+   与游戏的通信
+   ---------------------------------------------------------
+   1) 开局时把昵称注入游戏（SET_PLAYER）
+   2) 游戏内点「排行榜」→ 打开抽屉（OPEN_LEADERBOARD）
+   3) 游戏内点「重新开始」后，重新注入昵称
+   ========================================================= */
+gameFrame.addEventListener('load', () => {
+  setTimeout(pushPlayerName, 400);
+});
+
+function pushPlayerName() {
+  const name = getPlayerName();
+  if (!name) return;
+  try {
+    gameFrame.contentWindow.postMessage({ type: 'SET_PLAYER', name }, '*');
+  } catch (_) {}
+}
+
+window.addEventListener('message', (ev) => {
+  const d = ev.data;
+  if (!d) return;
+  if (d.type === 'OPEN_LEADERBOARD') openLeaderboard();
+  if (d.type === 'REQUEST_PLAYER')    pushPlayerName();
+  if (d.type === 'PLAYER_NAME_CHANGED' && d.name) {
+    setPlayerName(d.name);
+  }
+});
+
+/* 供外部（如自动测试）调用 */
+window.__wbc = {
+  openLeaderboard, closeLeaderboard,
+  get ready() { return cloudReady; },
+  get lastResult() { return lastResult; },
+};
+</script>
 </body>
 </html>

@@ -1,0 +1,83 @@
+# Global Integration Challenge · 复刻修复版
+
+原站：<https://yan-shipeng.github.io/integration/>
+
+## 问题
+
+**胜利结算页的底部按钮被截断，看不到也点不到。**
+
+实测（视口 375×667，即 iPhone SE / 多数小屏安卓）：
+
+| 元素 | top | bottom | 结果 |
+|---|---|---|---|
+| View Action Log | 645 | 693 | 溢出 26px |
+| Export PDF | 703 | 751 | 溢出 84px |
+| **Restart** | 758 | **806** | **溢出 139px** |
+
+即按钮条整体落在视口之外 139px。更糟的是**页面无法滚动到底**，
+用户没有任何办法把按钮滚进视野，只能卡在结算页出不去。
+
+### 根本原因
+
+原站是**两层 iframe 嵌套**：
+
+```
+yan-shipeng.github.io/integration/          ← 外层 index.html，只放一个 iframe
+  └─ iframe → china-game-mzbua6le.manus.space/en   ← React 外壳
+       └─ srcdoc iframe → 游戏本体（375KB 单文件）
+```
+
+游戏本体内层滚动容器的**高度未被约束**，导致 `clientHeight === scrollHeight`（都是 846px）。
+既然 `scrollHeight` 不超过 `clientHeight`，就**不产生可滚动区域**，
+内容因此直接溢出到视口之外 —— 这就是"滚也滚不到"的原因。
+
+雪上加霜的是移动端还有一条 **56px 高的固定底部导航栏**（Network / Decide / Log），
+`z-index:200`，而 `.app` 只给了 72px 的 `padding-bottom`，余量在长内容页上不够。
+
+## 修复
+
+三层修复，全部通过**追加覆盖式 CSS/JS** 实现，**未改动任何一行原有游戏逻辑**：
+
+1. **约束滚动容器并开启滚动** — `html,body { height:100% }` + `overflow-y:auto`，
+   让页面真正产生可滚动区域，内容不再溢出。
+2. **结算页隐藏底部导航栏** — 结算页本身已自带 View Log / Export PDF / Restart，
+   功能与导航栏重复；隐藏后从根上消除遮挡（`body.screen-ending #mobileBottomNav`）。
+3. **补齐安全间距** — `env(safe-area-inset-bottom)` 兜住 iOS 小横条；
+   矮屏（≤700px 高）额外收紧内边距，保证按钮首屏可见。
+   另加运行时 JS 兜底：结算页渲染后主动测量并滚动，防止个别浏览器高度计算差异。
+4. **决策页悬浮执行条**同步抬高到导航栏之上（`bottom: calc(57px + safe-area)`）。
+
+## 验证结果
+
+Playwright 实测 5 种视口，结算页三个按钮**全部完整可见且可命中点击**，JS 零报错：
+
+| 设备 | 视口 | View Action Log | Export PDF | Restart |
+|---|---|---|---|---|
+| iPhone SE | 375×667 | ✅ 421–469 | ✅ 480–528 | ✅ 538–577 |
+| iPhone 12 | 390×844 | ✅ 600–649 | ✅ 659–707 | ✅ 717–756 |
+| Pixel 5 | 393×851 | ✅ 607–655 | ✅ 665–714 | ✅ 724–763 |
+| 小屏安卓 | 360×640 | ✅ 395–443 | ✅ 453–501 | ✅ 511–550 |
+| iPad | 768×1024 | ✅ 827–875 | ✅ 827–875 | ✅ 885–924 |
+
+同时回归测试通过：开局 → 简报 → 社交网络 → 决策页（12 位关键人物、6 类动作）→
+执行决策（回合 1→2、影响弹窗）→ 结算页，全流程正常，无 JS 错误。
+
+## 文件说明
+
+| 文件 | 说明 |
+|---|---|
+| `index.html` | 入口，与原站结构一致（iframe 包一层），可直接双击打开 |
+| `integration-fixed.html` | 游戏本体（自包含单文件，约 380KB），已包含全部修复 |
+| `before-after.png` | 修复前后对比图 |
+
+两个 HTML 都是**完全自包含**的，无外部依赖，离线可用（仅字体走 Google Fonts，
+断网时自动回退到系统字体）。
+
+## 部署
+
+把这三个文件（`index.html` 必需，另两个可选）替换到 GitHub Pages 仓库
+`integration/` 目录下即可，无需改任何构建配置。
+
+> 注意：因为登录态/排行榜依赖原 `manus.space` 后端，复刻版是从原站提取的静态本体，
+> 排行榜的云端同步不会生效（本地功能完整）。若要保留排行榜，建议只把修复用的
+> CSS/JS 片段合并回原 React 项目。
