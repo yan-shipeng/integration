@@ -132,3 +132,54 @@ Playwright 实测 5 种视口，结算页三个按钮**全部完整可见且可�
 - 榜单**不是实时**的，最长有约 15 分钟采集延迟（玩家本人因乐观更新可立即看到）。
 - ntfy.sh 为境外服务（实测国内可直连），若某天不可用，需更换提交通道；
   读取路径不受影响，已落盘的成绩始终可看。
+
+## 追加修复（replica v2）· 结算弹窗的操作按钮看不见
+
+第一轮修复（replica v1）只覆盖了**结算页 `#screen-ending`**。用真实终局回合复测后发现
+另一处漏网：**局终结果弹窗 `#impactModal`** 的「📊 View Final Score / View Action Log」
+按钮同样看不到，用户会卡在弹窗里**进不去结算页**——从用户视角看，症状就是「结算页最下面的按钮显示不出来」。
+
+### 复现与根因
+
+真实终局回合实测（修复前）：
+
+| 视口 | 弹窗卡片可视高 | 内容高 | 按钮 top→bottom | 结果 |
+|---|---|---|---|---|
+| 375×667 | 600 | 831 | 787→857 | 视口外，看不到 |
+| 390×844 | 760 | 956 | 930→1000 | 视口外，看不到 |
+| 360×640 | 576 | 877 | 830→901 | 视口外，看不到 |
+
+根因是**双重**的：
+
+1. `.modal-card` 是内部滚动容器（`overflow:auto`），操作行排在 `#impactBody` 之后；
+   内容一长，操作行就被推到卡片可视区之外，而手机上**没有可见滚动条**，看不出「还能往下滚」。
+2. `showModal()` 每次渲染后执行 `card.scrollTop = 0`，并用
+   `nextBtn.focus({preventScroll:true})` **刻意阻止**自动滚动到按钮——
+   等于主动把按钮藏起来。
+
+### 修复方式
+
+把卡片改为**纵向 flex**，让中间内容区自己滚动、两条操作行**固定在卡片底部**（叠加式 CSS，未改动游戏逻辑）：
+
+```css
+.modal-card { display:flex !important; flex-direction:column !important;
+              overflow:hidden !important; padding:0 !important; }
+.modal-card > #impactBody { flex:1 1 auto; min-height:0; overflow-y:auto;
+                            -webkit-overflow-scrolling:touch; }
+.modal-card > #modalActions,
+.modal-card > #modalFinalActions { flex:0 0 auto;
+  padding:14px 28px calc(14px + env(safe-area-inset-bottom, 0px));
+  background:var(--surface); border-top:1px solid var(--border);
+  box-shadow:0 -10px 24px rgba(0,0,0,.35); position:relative; z-index:6; }
+```
+
+### 验证结果
+
+Playwright 跑**真实终局回合**（选动作 → 执行 → 资源耗尽 → `checkEnding()` 触发），
+8 种视口下弹窗与结算页的**全部按钮都完整可见且命中点击**，8/8 通过：
+
+| 视口 | 弹窗按钮 | 结算页按钮 |
+|---|---|---|
+| 375×667 / 390×844 / 360×640 / 393×851 / 430×932 / 768×1024 / 1280×720 / 1280×620 | 2/2 可见可点 | 4/4 可见可点 |
+
+> 注意：弹窗在动作执行后约 **4.8 秒**才出现（引擎内还有异步结算），自动化测试需等待足够时长。

@@ -928,6 +928,52 @@
   /* D. 防横向溢出 */
   #screen-ending, #screen-ending * { max-width: 100%; box-sizing: border-box; }
 
+  /* =========================================================
+     FIX (replica v2) — 结算弹窗的操作按钮始终可见可点
+     =========================================================
+     实测（修改前，真实终局回合）：
+       .modal-card 是内部滚动容器（overflow:auto），内容高 831–956px，
+       卡片只有 576–760px；而 showModal() 每次都把卡片 scrollTop 归零、
+       并以 focus({preventScroll:true}) 刻意阻止滚动，于是
+       「📊 View Final Score / View Action Log」被埋在下方，
+       用户看不到也点不到，卡在弹窗里进不去结算页。
+     对策：
+       把卡片改成纵向 flex，中间内容区自己滚动，
+       两条操作行固定在卡片底部，任何视口下都可见可点。
+     ========================================================= */
+  .modal-card {
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+  }
+  .modal-card > #impactBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 28px 28px 8px;
+  }
+  .modal-card > #modalActions,
+  .modal-card > #modalFinalActions {
+    flex: 0 0 auto;
+    margin: 0 !important;
+    padding: 14px 28px calc(14px + env(safe-area-inset-bottom, 0px));
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -10px 24px rgba(0, 0, 0, .35);
+    position: relative;
+    z-index: 6;
+  }
+  @media (max-width: 768px) {
+    .modal-card > #impactBody { padding: 20px 20px 8px; }
+    .modal-card > #modalActions,
+    .modal-card > #modalFinalActions {
+      padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px));
+    }
+  }
+
 </style>
 
     <section class="screen" id="screen-intro">
