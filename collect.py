@@ -17,7 +17,7 @@ import urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LB_PATH = os.path.join(HERE, "data", "leaderboard.json")
-TOPIC = "wb-intg-lb-7k3m9xq2"
+TOPIC = "wb-intg-lb-a5fae5bcd226"
 MAX_ENTRIES = 500
 
 FIELDS = {

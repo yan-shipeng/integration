@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-10-11T09:19:37Z",
+  "updated_at": "2026-10-11T09:23:01Z",
   "scores": [
     {
       "player_name": "示例·整合高手",
@@ -15,7 +15,7 @@
       "final_pressure": 14,
       "aggressive_index": 40,
       "conservative_index": 35,
-      "ts": 1791706777
+      "ts": 1791706981
     },
     {
       "player_name": "示例·稳健派",
@@ -30,7 +30,7 @@
       "final_pressure": 20,
       "aggressive_index": 22,
       "conservative_index": 66,
-      "ts": 1791707377
+      "ts": 1791707581
     }
   ]
 }
