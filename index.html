@@ -6,11 +6,10 @@
 <title>Global Integration Challenge · 整合管理模拟</title>
 <meta name="description" content="Strategy Implementation Simulation — 线上模拟游戏。带领企业整合，在 60 资源单位内转化 12 位关键人物，并与同伴比较策略。" />
 
-<!-- WorkBuddy 云服务 SDK（CDN 形式，本项目为纯静态页面，无构建步骤） -->
-<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<!-- 排行榜后端：读同源 data/leaderboard.json，写 ntfy.sh 提交通道（无第三方 SDK 依赖） -->
 
 <style>
-  /* ── 云服务未就绪时的占位样式 ── */
+  /* ── 基础重置 ── */
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     width: 100%; height: 100%;
@@ -157,39 +156,39 @@
 
 <script>
 /* =========================================================
-   云服务初始化
+   排行榜后端
    ---------------------------------------------------------
-   endpoint / publishableKey 来自开通云服务时返回的 publicConfig。
-   在下方 __CLOUD_CONFIG__ 里填入后即可生效。
+   读：与页面同源的 data/leaderboard.json（GitHub Pages 托管）
+       —— 同源天然无 CORS 问题，且国内可直连。
+   写：POST 到 ntfy.sh 主题（免注册、CORS 全开、国内可达），
+       由采集器汇总进 leaderboard.json，形成持久榜单。
    ========================================================= */
-const __CLOUD_CONFIG__ = /*__CLOUD_CONFIG__*/ null;
+const LB_DATA_URL  = 'data/leaderboard.json';
+const LB_SUBMIT    = 'https://ntfy.sh/wb-intg-lb-7k3m9xq2';
+const LB_READY     = true;   /* 后端为静态托管，恒定可用 */
 
-let cloud = null;
-let cloudReady = false;
+let cloudReady = LB_READY;
 
-function initCloud() {
-  if (!__CLOUD_CONFIG__ || !__CLOUD_CONFIG__.endpoint || !__CLOUD_CONFIG__.publishableKey) {
-    console.warn('[cloud] publicConfig 未配置，排行榜暂不可用');
-    return false;
-  }
-  if (typeof WorkBuddyCloud === 'undefined') {
-    console.warn('[cloud] SDK 未加载（可能离线）');
-    return false;
-  }
-  try {
-    cloud = WorkBuddyCloud.createWorkBuddyCloud({
-      endpoint: __CLOUD_CONFIG__.endpoint,
-      oauthRelayBaseUrl: __CLOUD_CONFIG__.oauthRelayBaseUrl,
-      publishableKey: __CLOUD_CONFIG__.publishableKey,
-    });
-    cloudReady = true;
-    return true;
-  } catch (e) {
-    console.warn('[cloud] 初始化失败：', e && e.message);
-    return false;
-  }
+/* 开局时把昵称注入游戏用，名字仍在 localStorage */
+const NAME_KEY = 'co-leaderboard-name';
+function getPlayerName() {
+  try { return localStorage.getItem(NAME_KEY) || ''; } catch (_) { return ''; }
 }
-initCloud();
+function setPlayerName(n) {
+  try { localStorage.setItem(NAME_KEY, n); } catch (_) {}
+}
+
+let lbCache = null;      /* 最近一次拉取的榜单 */
+
+async function fetchLeaderboard(force) {
+  if (lbCache && !force) return lbCache;
+  const res = await fetch(LB_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
+  if (!res.ok) throw new Error('榜单读取失败 HTTP ' + res.status);
+  const doc = await res.json();
+  const rows = Array.isArray(doc) ? doc : (doc.scores || []);
+  lbCache = rows;
+  return rows;
+}
 
 /* =========================================================
    工具
@@ -203,13 +202,6 @@ function esc(s) {
 }
 
 /* 玩家昵称：存本地，开局时注入游戏 */
-const NAME_KEY = 'co-leaderboard-name';
-function getPlayerName() {
-  try { return localStorage.getItem(NAME_KEY) || ''; } catch (_) { return ''; }
-}
-function setPlayerName(n) {
-  try { localStorage.setItem(NAME_KEY, n); } catch (_) {}
-}
 
 /* =========================================================
    成绩上报
@@ -227,15 +219,10 @@ window.addEventListener('message', async (ev) => {
   const name = getPlayerName() || '匿名玩家';
   const r = d.result;
 
-  if (!cloudReady) {
-    showSaveState('offline');
-    return;
-  }
-
   showSaveState('saving');
   try {
     const totalRounds = Math.max(1, Number(r.totalRounds) || 1);
-    const { error } = await cloud.database.from('scores').insert({
+    const payload = {
       player_name:    name,
       status:         r.won ? 'win' : 'fail',
       total_score:    clampInt(r.totalScore, 0, 100),
@@ -248,14 +235,35 @@ window.addEventListener('message', async (ev) => {
       final_pressure: clampInt(r.finalPressure, 0, 999),
       aggressive_index: clampInt(r.aggressiveIndex, 0, 999),
       conservative_index: clampInt(r.conservativeIndex, 0, 999),
+      ts: Math.floor(Date.now() / 1000),
+    };
+
+    const res = await fetch(LB_SUBMIT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
-    if (error) throw error;
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+
+    /* 立刻在本机榜单里乐观插入，用户无需等采集器就能看到自己 */
+    optimisticInsert(payload);
     showSaveState('saved');
   } catch (e) {
-    console.warn('[cloud] 成绩保存失败：', e && (e.message || e));
+    console.warn('[lb] 成绩提交失败：', e && (e.message || e));
     showSaveState('failed');
   }
 });
+
+/* 乐观更新：把刚打完的成绩即时并入本地榜单缓存 */
+function optimisticInsert(p) {
+  try {
+    const rows = lbCache || [];
+    rows.push(p);
+    rows.sort((a, b) => (Number(b.total_score) || 0) - (Number(a.total_score) || 0)
+                     || (Number(a.ts) || 0) - (Number(b.ts) || 0));
+    lbCache = rows;
+  } catch (_) {}
+}
 
 function clampInt(v, lo, hi) {
   const n = Math.round(Number(v));
@@ -266,10 +274,10 @@ function clampInt(v, lo, hi) {
 /* 告诉游戏本局是否已存档（结算页顶部会显示徽标） */
 function showSaveState(state) {
   const map = {
-    saving:  { text: '⏳ 正在保存成绩…',             color: '#fbbf24' },
-    saved:   { text: '✓ 已保存到排行榜',             color: '#4ade80' },
-    failed:  { text: '⚠️ 成绩保存失败（排行榜不可用）', color: '#f7a072' },
-    offline: { text: 'ℹ️ 本地模式：未连接排行榜',     color: '#5a8090' },
+    saving:  { text: '⏳ 正在提交成绩…',               color: '#fbbf24' },
+    saved:   { text: '✓ 已提交到排行榜（稍后汇总上榜）', color: '#4ade80' },
+    failed:  { text: '⚠️ 成绩提交失败，请检查网络',      color: '#f7a072' },
+    offline: { text: 'ℹ️ 本地模式：未连接排行榜',        color: '#5a8090' },
   };
   const s = map[state];
   if (!s) return;
@@ -283,13 +291,9 @@ function showSaveState(state) {
 /* =========================================================
    排行榜抽屉
    ========================================================= */
-function getTop(n) {
-  return cloud.database
-    .from('scores')
-    .select('id, player_name, status, total_score, converted_count, total_rounds, resources_left, final_cred, final_pressure, created_at')
-    .order('total_score', { ascending: false })
-    .order('created_at', { ascending: true })
-    .limit(n);
+async function getTop(n) {
+  const rows = await fetchLeaderboard(false);
+  return rows.slice(0, n);
 }
 
 async function openLeaderboard() {
@@ -297,26 +301,15 @@ async function openLeaderboard() {
   ov.classList.add('show');
   document.body.style.overflow = 'hidden';
 
-  if (!cloudReady) {
-    $('lbStats').innerHTML = '';
-    $('lbMyCard').innerHTML = '';
-    $('lbList').innerHTML =
-      '<div class="lb-empty lb-err">排行榜暂不可用。<br>云端服务正在开通中，请稍后再试。</div>';
-    return;
-  }
-
   $('lbList').innerHTML = '<div class="lb-loading">加载中…</div>';
   try {
-    const [listRes, statsRes] = await Promise.all([
-      getTop(50),
-      cloud.database.from('scores').select('total_score, base_score, health_score', { count: 'exact' }),
-    ]);
-    if (listRes.error) throw listRes.error;
-
-    renderStats(statsRes.data || []);
-    renderList(listRes.data || []);
+    const all = await fetchLeaderboard(true);
+    renderStats(all);
+    renderList(all.slice(0, 50));
   } catch (e) {
-    console.warn('[cloud] 读取排行榜失败：', e && (e.message || e));
+    console.warn('[lb] 读取排行榜失败：', e && (e.message || e));
+    $('lbStats').innerHTML = '';
+    $('lbMyCard').innerHTML = '';
     $('lbList').innerHTML =
       '<div class="lb-empty lb-err">读取排行榜失败。<br>' + esc(e && (e.message || e)) + '</div>';
   }

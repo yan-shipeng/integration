@@ -66,18 +66,69 @@ Playwright 实测 5 种视口，结算页三个按钮**全部完整可见且可�
 
 | 文件 | 说明 |
 |---|---|
-| `index.html` | 入口，与原站结构一致（iframe 包一层），可直接双击打开 |
+| `index.html` | 入口：一层 iframe 包住游戏本体 + 排行榜抽屉 |
 | `integration-fixed.html` | 游戏本体（自包含单文件，约 380KB），已包含全部修复 |
-| `before-after.png` | 修复前后对比图 |
+| `data/leaderboard.json` | **在线排行榜数据**（与页面同源，直接可读） |
+| `collect.py` | 采集器：把提交通道的成绩汇总进 `leaderboard.json` |
+| `.github/workflows/collect-leaderboard.yml` | 每 15 分钟自动跑一次采集 |
 
-两个 HTML 都是**完全自包含**的，无外部依赖，离线可用（仅字体走 Google Fonts，
+游戏本体完全自包含，无外部依赖，离线可用（仅字体走 Google Fonts，
 断网时自动回退到系统字体）。
+
+## 在线排行榜 · 架构
+
+排行榜需要「任意设备可读 + 任意设备可写」，而这里是纯静态站（无自建后端），
+所以采用**读写分离**的两段式设计：
+
+```
+写入  ─── 浏览器 POST ──→  ntfy.sh 主题（提交通道，保留约 12h）
+                                    │
+                                    │  采集器每 15 分钟拉取
+                                    ▼
+读取  ←── 同源 fetch ────  data/leaderboard.json（GitHub Pages 托管，永久）
+```
+
+**为什么这么设计**
+
+- **读**走页面**同源**的 `data/leaderboard.json`。同源 = 完全不存在 CORS 问题，
+  而且 GitHub Pages 在国内可直连（`raw.githubusercontent.com` 被墙，但
+  `*.github.io` 正常）。
+- **写**走 `ntfy.sh`。它是少数**免注册、CORS 全开
+  （`Access-Control-Allow-Origin: *`）、且国内可达**的可写入服务，
+  浏览器可以直接 POST，不需要任何密钥。
+- 因为 ntfy 消息只保留约 12 小时，采集器把它当作**临时信箱**：
+  定期把成绩落到 `leaderboard.json`，形成持久榜单。
+  15 分钟一轮，留有充足余量。
+
+**数据流**
+
+1. 玩家结算 → 游戏 `postMessage` 一条 `GAME_ENDED`（含完整战绩）
+2. `index.html` 校验并裁剪字段，POST 到 ntfy 主题
+3. 前端**乐观插入**本地缓存 → 玩家立刻能看到自己的成绩
+4. GitHub Actions 每 15 分钟跑 `collect.py`：拉 ntfy → 去重 → 合并 → 按分排序 → 提交 JSON
+5. 下次打开排行榜，读到的就是更新后的持久榜单
+
+**字段与校验**：`collect.py` 对每条提交做白名单取值 + 范围钳制
+（分数 0–100、回合 ≥1 等），并按 `(昵称, 时间戳, 总分)` 去重，防止重复轮询产生重复行。
+榜单上限 500 条。
+
+**排序**：总分降序，同分按提交时间升序（先到先得）。
 
 ## 部署
 
-把这三个文件（`index.html` 必需，另两个可选）替换到 GitHub Pages 仓库
-`integration/` 目录下即可，无需改任何构建配置。
+把仓库内容推到 GitHub Pages 即可，无需构建步骤：
 
-> 注意：因为登录态/排行榜依赖原 `manus.space` 后端，复刻版是从原站提取的静态本体，
-> 排行榜的云端同步不会生效（本地功能完整）。若要保留排行榜，建议只把修复用的
-> CSS/JS 片段合并回原 React 项目。
+- `index.html`、`integration-fixed.html`、`data/leaderboard.json` 直接静态托管
+- `.github/workflows/collect-leaderboard.yml` 由 GitHub Actions 自动执行
+  （需在仓库 Settings → Actions → General 里确认 Workflow permissions 为
+  **Read and write**，否则无法提交榜单更新）
+
+手动跑一次采集：`python3 collect.py`（加 `--dry-run` 只看不写）。
+
+## 已知限制
+
+- 写通道 `ntfy.sh` **无鉴权**，理论上可被刷分。对教学演示场景够用；
+  若需防刷需引入签名或自建后端。
+- 榜单**不是实时**的，最长有约 15 分钟采集延迟（玩家本人因乐观更新可立即看到）。
+- ntfy.sh 为境外服务（实测国内可直连），若某天不可用，需更换提交通道；
+  读取路径不受影响，已落盘的成绩始终可看。

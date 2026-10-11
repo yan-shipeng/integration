@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-11T09:19:37Z",
+  "scores": [
+    {
+      "player_name": "示例·整合高手",
+      "status": "win",
+      "total_score": 92,
+      "base_score": 92,
+      "health_score": 88,
+      "converted_count": 11,
+      "total_rounds": 5,
+      "resources_left": 8,
+      "final_cred": 62,
+      "final_pressure": 14,
+      "aggressive_index": 40,
+      "conservative_index": 35,
+      "ts": 1791706777
+    },
+    {
+      "player_name": "示例·稳健派",
+      "status": "win",
+      "total_score": 78,
+      "base_score": 78,
+      "health_score": 80,
+      "converted_count": 9,
+      "total_rounds": 6,
+      "resources_left": 15,
+      "final_cred": 70,
+      "final_pressure": 20,
+      "aggressive_index": 22,
+      "conservative_index": 66,
+      "ts": 1791707377
+    }
+  ]
+}
